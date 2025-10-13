@@ -1,108 +1,185 @@
-// src/main.js - escena simple inspirada en Coraline
+// src/main.js - escena que carga coraline_coraline_wii.glb
+// Debug-friendly scene loader: logs pasos y dibuja un placeholder si el GLB no aparece.
 const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true);
 
-const createScene = function () {
+async function createScene() {
   const scene = new BABYLON.Scene(engine);
 
-  // Cámara
-  const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, Math.PI / 3, 18, new BABYLON.Vector3(0, 1.5, 0), scene);
+  const camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 6, BABYLON.Vector3.Zero(), scene);
   camera.attachControl(canvas, true);
+  camera.wheelPrecision = 50;
 
-  // Luces: ambiente tenue y luz direccional cálida
-  const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0, 1, 0), scene);
-  hemi.intensity = 0.4;
-  const dir = new BABYLON.DirectionalLight("dir", new BABYLON.Vector3(-0.5, -1, -0.5), scene);
-  dir.position = new BABYLON.Vector3(5, 10, 5);
-  dir.intensity = 0.9;
+  new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene).intensity = 0.8;
+  const dir = new BABYLON.DirectionalLight("dir", new BABYLON.Vector3(-0.5,-1,-0.5), scene);
+  dir.position = new BABYLON.Vector3(5,10,5);
+  dir.intensity = 0.6;
 
-  // Añadir un glow sutil para dar vida a colores (sin archivos externos)
-  const glow = new BABYLON.GlowLayer("glow", scene);
-  glow.intensity = 0.2;
+  const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 40, height: 40 }, scene);
+  const gmat = new BABYLON.StandardMaterial("gmat", scene);
+  gmat.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.22);
+  ground.material = gmat;
 
-  // Suelo simple (más claro para mejor visibilidad)
-  const ground = BABYLON.MeshBuilder.CreateGround("ground", {width: 40, height: 40}, scene);
-  const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
-  groundMat.diffuseColor = new BABYLON.Color3(0.18, 0.14, 0.1); // marrón claro
-  ground.material = groundMat;
+  const folder = "assets/coraline/";
+  const file = "coraline_walk.glb";
 
-  // Paredes simples alrededor para contraste
-  const backWall = BABYLON.MeshBuilder.CreatePlane("backWall", {width: 40, height: 12}, scene);
-  backWall.position = new BABYLON.Vector3(0, 6, -20);
-  const wallMat = new BABYLON.StandardMaterial("wallMat", scene);
-  wallMat.diffuseColor = new BABYLON.Color3(0.12, 0.08, 0.04);
-  backWall.material = wallMat;
+  try {
+    const res = await BABYLON.SceneLoader.ImportMeshAsync("", folder, file, scene);
 
-  const leftWall = BABYLON.MeshBuilder.CreatePlane("leftWall", {width: 40, height: 12}, scene);
-  leftWall.position = new BABYLON.Vector3(-20, 6, 0);
-  leftWall.rotation.y = Math.PI/2;
-  leftWall.material = wallMat;
+    // Texturas (respetando mayúsculas)
+    const tex = {
+      body:    new BABYLON.Texture("assets/coraline/textures/Body.png", scene),
+      eyes:    new BABYLON.Texture("assets/coraline/textures/Eyes.png", scene),
+      hair:    new BABYLON.Texture("assets/coraline/textures/Hair.png", scene),
+      head:    new BABYLON.Texture("assets/coraline/textures/Head.png", scene),
+      firefly: new BABYLON.Texture("assets/coraline/textures/Firefly.png", scene),
+    };
 
-  // Portal / puerta secreta (una puerta roja en un marco)
-  const doorFrame = BABYLON.MeshBuilder.CreateBox("doorFrame", {height: 6, width: 3.2, depth: 0.2}, scene);
-  doorFrame.position = new BABYLON.Vector3(0, 3, -6);
-  const frameMat = new BABYLON.StandardMaterial("frameMat", scene);
-  frameMat.diffuseColor = new BABYLON.Color3(0.13, 0.06, 0.03);
-  doorFrame.material = frameMat;
+    function mkMat(name, t) {
+      const m = new BABYLON.PBRMaterial(name, scene);
+      m.albedoTexture = t;
+      m.metallic = 0;
+      m.roughness = 0.9;
+      return m;
+    }
+    const mats = {
+      body:    mkMat("m_body", tex.body),
+      eyes:    mkMat("m_eyes", tex.eyes),
+      hair:    mkMat("m_hair", tex.hair),
+      head:    mkMat("m_head", tex.head),
+      firefly: mkMat("m_firefly", tex.firefly),
+    };
 
-  const door = BABYLON.MeshBuilder.CreatePlane("door", {height: 5.4, width: 2.6}, scene);
-  door.position = new BABYLON.Vector3(0, 3, -6.11);
-  // Puerta 2D con detalles (DynamicTexture)
-  const doorDT = new BABYLON.DynamicTexture('doorDT', {width: 512, height: 1060}, scene, true);
-  const dctx = doorDT.getContext();
-  // Fondo madera rojiza
-  dctx.fillStyle = '#7d1a1c'; dctx.fillRect(0,0,512,1060);
-  // Borde oscuro
-  dctx.strokeStyle = '#3d0c0c'; dctx.lineWidth = 20; dctx.strokeRect(10,10,492,1040);
-  // Paneles
-  function panel(x,y,w,h){ dctx.strokeStyle = '#4e1111'; dctx.lineWidth = 10; dctx.strokeRect(x,y,w,h); }
-  panel(90,160,332,300); // superior
-  panel(90,560,332,360); // inferior
-  // Perilla y placa
-  dctx.fillStyle = '#caa14a'; dctx.beginPath(); dctx.arc(380,530,18,0,Math.PI*2); dctx.fill();
-  dctx.fillStyle = '#9b7d30'; dctx.fillRect(360,505,40,10);
-  doorDT.update();
-  const doorMat = new BABYLON.StandardMaterial("doorMat", scene);
-  doorMat.diffuseTexture = doorDT; doorMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
-  door.material = doorMat;
+    // Candidatos y nombres originales (antes de reasignar)
+    const candidates = res.meshes.filter(m => m !== ground && m.getTotalVertices() > 0);
+    const originalNames = new Map(candidates.map(m => [m, (m.material?.name || m.name || "").toLowerCase()]));
 
-  // Personaje: billboard 2D estilizado (cabello azul delante de la cara, abrigo amarillo)
-  function createCoralineBillboard(scene) {
-    const plane = BABYLON.MeshBuilder.CreatePlane('coraline2D', {width: 1.6, height: 2.6}, scene);
-    plane.position = new BABYLON.Vector3(-2, 1.5, -2);
-    plane.billboardMode = BABYLON.AbstractMesh.BILLBOARDMODE_Y;
-    const dt = new BABYLON.DynamicTexture('coralineDT', {width: 512, height: 832}, scene, true);
-    dt.hasAlpha = true;
-    const ctx = dt.getContext();
-    ctx.clearRect(0,0,512,832);
-    // helpers
-    function path(points, fill) { ctx.beginPath(); ctx.moveTo(points[0][0], points[0][1]); for (let i=1;i<points.length;i++){ ctx.lineTo(points[i][0], points[i][1]); } ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); }
-    function circle(x,y,r,fill){ ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); }
-    // Cara y cuerpo primero
-    circle(256,130,70,'#FCE2C6');
-    path([[180,180],[332,180],[380,640],[132,640]], '#F9DC14'); // abrigo
-    circle(220,130,16,'#111'); circle(292,130,16,'#111'); // ojos botones
-    ctx.strokeStyle = '#7A1515'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(256,170,24,0,Math.PI); ctx.stroke(); // boca
-    // Cabello al final (delante de la cara), elevado en Y
-    path([[160,40],[352,40],[352,110],[160,110]], '#2186F4'); // cap superior
-    path([[140,100],[180,100],[175,240],[140,240]], '#2186F4'); // mechón izq
-    path([[332,100],[372,100],[372,240],[337,240]], '#2186F4'); // mechón der
-    dt.update();
-    const mat = new BABYLON.StandardMaterial('coraline2DMat', scene);
-    mat.diffuseTexture = dt; mat.opacityTexture = dt; mat.emissiveColor = new BABYLON.Color3(1,1,1);
-    plane.material = mat;
-    return plane;
+    // Glow (una sola vez, dentro del try)
+    const glow = new BABYLON.GlowLayer("glow", scene);
+    glow.intensity = 0.6;
+
+    // Overrides definitivos (swap eyes/firefly)
+    const overrides = new Map([
+      ["mesh_3.001", "firefly"], // firefly
+      ["mesh_4.004", "eyes"],    // eyes
+    ]);
+
+    // Heurística y overrides en el mismo scope
+    scene.executeWhenReady(() => {
+      scene.render(false);
+      const parts = candidates.map(m => {
+        const bi = m.getBoundingInfo();
+        const min = bi.boundingBox.minimumWorld;
+        const max = bi.boundingBox.maximumWorld;
+        const center = min.add(max).scale(0.5);
+        const size = max.subtract(min);
+        return { m, center, size, maxY: max.y };
+      }).sort((a, b) => b.maxY - a.maxY);
+
+      const hairPart = parts[0];
+      const headPart = parts.find(p => p.m !== hairPart.m && p.size.y > (hairPart.size.y * 0.3)) || parts[1];
+      const eyesParts = parts.filter(p =>
+        p.m !== hairPart.m &&
+        p.m !== headPart.m &&
+        p.size.y < (headPart?.size.y || 1) * 0.35 &&
+        Math.abs(p.center.y - (headPart?.center.y || 0)) < (headPart?.size.y || 1) * 0.6
+      );
+
+      // Default = body
+      parts.forEach(p => p.m.material = mats.body);
+      if (hairPart) hairPart.m.material = mats.hair;
+      if (headPart) headPart.m.material = mats.head;
+      eyesParts.forEach(p => p.m.material = mats.eyes);
+
+      // Overrides por nombre original
+      candidates.forEach(m => {
+        const orig = originalNames.get(m); // p.ej. "mesh_3.001"
+        const ov = overrides.get(orig);
+        if (!ov) return;
+        if (ov === "firefly") {
+          m.material = mats.firefly;
+          mats.firefly.emissiveTexture = tex.firefly;
+          mats.firefly.emissiveColor = new BABYLON.Color3(1, 1, 1);
+        } else if (ov === "eyes") {
+          m.material = mats.eyes;
+        }
+      });
+
+      console.log("Asignación final:");
+      candidates.forEach(p => console.log(`- ${p.name} | orig=${originalNames.get(p)} -> ${p.material?.name}`));
+    });
+
+    // Parent y encuadre
+    const container = new BABYLON.TransformNode("charRoot", scene);
+    const imported = res.meshes.filter(m => m && m !== ground);
+    imported.forEach(m => { if (m.rotationQuaternion) m.rotationQuaternion = null; });
+    if (imported[0]) imported[0].parent = container;
+
+    autoOrientUpright(container, imported, scene);
+    frameCameraAndScale(container, imported, camera, scene);
+
+    // Animaciones
+    const groups = res.animationGroups ?? [];
+    console.log("AnimationGroups:", groups.map(g => `${g.name} (targets:${g.targetedAnimations?.length ?? 0})`));
+    groups.forEach(g => g.loopAnimation = true);
+    const playable = groups.find(g => (g.targetedAnimations?.length ?? 0) > 0);
+    if (playable) playable.start(true);
+
+  } catch (e) {
+    console.error("Error cargando GLB:", e);
   }
-  const coraline = createCoralineBillboard(scene);
-  scene.registerBeforeRender(()=>{
-    const t = performance.now()*0.001;
-    coraline.position.y = 1.5 + Math.sin(t*1.5)*0.03;
-    coraline.rotation.z = Math.sin(t*0.8)*0.02;
-  });
 
   return scene;
-};
+}
 
-const scene = createScene();
-engine.runRenderLoop(() => { scene.render(); });
-window.addEventListener("resize", () => { engine.resize(); });
+function computeWorldBounds(meshes) {
+  let min = new BABYLON.Vector3(+Infinity, +Infinity, +Infinity);
+  let max = new BABYLON.Vector3(-Infinity, -Infinity, -Infinity);
+  meshes.forEach(m => {
+    const bi = m.getBoundingInfo();
+    min = BABYLON.Vector3.Minimize(min, bi.boundingBox.minimumWorld);
+    max = BABYLON.Vector3.Maximize(max, bi.boundingBox.maximumWorld);
+  });
+  return { min, max, size: max.subtract(min), center: min.add(max).scale(0.5) };
+}
+
+function autoOrientUpright(container, meshes, scene) {
+  const trials = [
+    { axis: null, angle: 0 },
+    { axis: BABYLON.Axis.X, angle:  Math.PI/2 },
+    { axis: BABYLON.Axis.X, angle: -Math.PI/2 },
+    { axis: BABYLON.Axis.Z, angle:  Math.PI/2 },
+    { axis: BABYLON.Axis.Z, angle: -Math.PI/2 },
+  ];
+  const original = container.rotation.clone();
+  let best = { h: -Infinity, axis: null, angle: 0 };
+  for (const t of trials) {
+    container.rotation.copyFrom(original);
+    if (t.axis) container.rotate(t.axis, t.angle, BABYLON.Space.LOCAL);
+    scene.render(false);
+    const { size } = computeWorldBounds(meshes);
+    if (size.y > best.h) best = { h: size.y, axis: t.axis, angle: t.angle };
+  }
+  container.rotation.copyFrom(original);
+  if (best.axis) container.rotate(best.axis, best.angle, BABYLON.Space.LOCAL);
+}
+
+function frameCameraAndScale(container, meshes, camera, scene) {
+  scene.executeWhenReady(() => {
+    const { size } = computeWorldBounds(meshes);
+    const currentH = Math.max(0.001, size.y);
+    const desiredH = 1.8;
+    const s = desiredH / currentH;
+    container.scaling.set(s, s, s);
+    scene.render(false);
+    const { min, max } = computeWorldBounds(meshes);
+    const center = min.add(max).scale(0.5);
+    const diag = max.subtract(min).length();
+    camera.setTarget(center);
+    camera.radius = Math.max(3, diag * 0.8);
+    camera.beta = Math.min(Math.max(0.6, camera.beta), Math.PI - 0.6);
+  });
+}
+
+createScene().then(scene => engine.runRenderLoop(() => scene.render()));
+window.addEventListener("resize", () => engine.resize());
