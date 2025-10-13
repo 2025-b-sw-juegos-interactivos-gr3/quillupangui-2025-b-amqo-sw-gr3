@@ -1,0 +1,38 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Mantén package-lock.json (no lo ignores)
+# (asegura instalaciones reproducibles)
+
+# Builds / cobertura / caches
+dist/
+build/
+out/
+coverage/
+.cache/
+.tmp/
+.temp/
+
+# Entorno
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editores (opcional)
+.vscode/
+.idea/
+*.code-workspace
+
+# Si quieres mantener algunos archivos de .vscode, usa esto en lugar de ignorar toda la carpeta:
+# .vscode/*
+# !.vscode/tasks.json
+# !.vscode/launch.json
+# !.vscode/extensions.json
+# !.vscode/settings.json
