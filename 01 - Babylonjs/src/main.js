@@ -6,9 +6,10 @@ const engine = new BABYLON.Engine(canvas, true);
 async function createScene() {
   const scene = new BABYLON.Scene(engine);
 
-  const camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 6, BABYLON.Vector3.Zero(), scene);
-  camera.attachControl(canvas, true);
-  camera.wheelPrecision = 50;
+  // Cámara fija estilo Resident Evil - SIN attachControl
+  const camera = new BABYLON.FreeCamera("fixedCam", new BABYLON.Vector3(0, 5, -10), scene);
+  camera.setTarget(new BABYLON.Vector3(0, 1, 0)); // Mira hacia el centro del escenario
+  // NO attachControl - la cámara está completamente fija
 
   new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene).intensity = 0.8;
   const dir = new BABYLON.DirectionalLight("dir", new BABYLON.Vector3(-0.5,-1,-0.5), scene);
@@ -118,12 +119,99 @@ async function createScene() {
     autoOrientUpright(container, imported, scene);
     frameCameraAndScale(container, imported, camera, scene);
 
+    // Guardar y mostrar la rotación inicial después de autoOrient
+    scene.executeWhenReady(() => {
+      scene.render(false);
+      console.log("Rotación inicial del container después de autoOrient:", {
+        x: container.rotation.x,
+        y: container.rotation.y,
+        z: container.rotation.z
+      });
+    });
+
     // Animaciones
     const groups = res.animationGroups ?? [];
     console.log("AnimationGroups:", groups.map(g => `${g.name} (targets:${g.targetedAnimations?.length ?? 0})`));
-    groups.forEach(g => g.loopAnimation = true);
-    const playable = groups.find(g => (g.targetedAnimations?.length ?? 0) > 0);
-    if (playable) playable.start(true);
+    
+    const walkAnim = groups.find(g => (g.targetedAnimations?.length ?? 0) > 0);
+    
+    if (walkAnim) {
+      console.log("Animación encontrada:", walkAnim.name);
+      walkAnim.loopAnimation = true;
+      walkAnim.start(true);
+      walkAnim.goToFrame(0);
+      walkAnim.pause();
+    } else {
+      console.warn("No se encontró animación!");
+    }
+
+    // ===== MOVIMIENTO CON CÁMARA FIJA =====
+    const moveSpeed = 0.08;
+    const keys = {};
+    let isMoving = false;
+
+    window.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+      if (['w', 's', 'a', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
+        e.preventDefault();
+        keys[key] = true;
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      const key = e.key.toLowerCase();
+      keys[key] = false;
+    });
+
+    scene.onBeforeRenderObservable.add(() => {
+      let movement = BABYLON.Vector3.Zero();
+      let targetRotation = null;
+      
+      if (keys['w'] || keys['arrowup']) {
+        movement.z += 1;
+        targetRotation = Math.PI; // 180°
+      } else if (keys['s'] || keys['arrowdown']) {
+        movement.z -= 1;
+        targetRotation = 0; // 0°
+      } else if (keys['a'] || keys['arrowleft']) {
+        movement.x -= 1;
+        targetRotation = -Math.PI / 2; // -90°
+      } else if (keys['d'] || keys['arrowright']) {
+        movement.x += 1;
+        targetRotation = Math.PI / 2; // 90°
+      }
+
+      const wasMoving = isMoving;
+      isMoving = movement.length() > 0;
+
+      if (walkAnim && isMoving !== wasMoving) {
+        if (isMoving) {
+          console.log("Iniciando animación");
+          walkAnim.play(true);
+        } else {
+          console.log("Pausando animación");
+          walkAnim.pause();
+        }
+      }
+
+      if (isMoving) {
+        movement.normalize();
+        container.position.addInPlace(movement.scale(moveSpeed));
+        
+        if (targetRotation !== null) {
+          // Rotación INSTANTÁNEA para debug
+          container.rotation.y = targetRotation;
+          
+          console.log("Rotación aplicada:", {
+            targetDegrees: (targetRotation * 180 / Math.PI).toFixed(0) + "°",
+            targetRadians: targetRotation.toFixed(3),
+            currentY: container.rotation.y.toFixed(3),
+            currentX: container.rotation.x.toFixed(3),
+            currentZ: container.rotation.z.toFixed(3)
+          });
+        }
+      }
+    });
 
   } catch (e) {
     console.error("Error cargando GLB:", e);
@@ -166,18 +254,23 @@ function autoOrientUpright(container, meshes, scene) {
 
 function frameCameraAndScale(container, meshes, camera, scene) {
   scene.executeWhenReady(() => {
-    const { size } = computeWorldBounds(meshes);
+    scene.render(false);
+    scene.render(false);
+    
+    const { size, min } = computeWorldBounds(meshes);
     const currentH = Math.max(0.001, size.y);
     const desiredH = 1.8;
     const s = desiredH / currentH;
     container.scaling.set(s, s, s);
+    
     scene.render(false);
-    const { min, max } = computeWorldBounds(meshes);
-    const center = min.add(max).scale(0.5);
-    const diag = max.subtract(min).length();
-    camera.setTarget(center);
-    camera.radius = Math.max(3, diag * 0.8);
-    camera.beta = Math.min(Math.max(0.6, camera.beta), Math.PI - 0.6);
+    const { min: newMin, max, center } = computeWorldBounds(meshes);
+    const groundY = 0;
+    const offset = groundY - newMin.y;
+    container.position.y += offset;
+    
+    console.log("Ajuste de posición Y:", offset);
+    console.log("Posición final del container:", container.position.y);
   });
 }
 
