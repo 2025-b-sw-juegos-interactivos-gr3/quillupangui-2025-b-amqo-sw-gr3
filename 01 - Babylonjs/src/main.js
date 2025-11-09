@@ -6,19 +6,47 @@ const engine = new BABYLON.Engine(canvas, true);
 async function createScene() {
   const scene = new BABYLON.Scene(engine);
 
-  const camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 6, BABYLON.Vector3.Zero(), scene);
+  // CAMBIAR A CÁMARA QUE SIGUE AL JUGADOR (ArcRotateCamera)
+  const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.5, 10, BABYLON.Vector3.Zero(), scene);
   camera.attachControl(canvas, true);
-  camera.wheelPrecision = 50;
+  
+  // Deshabilitar controles de teclado de la cámara para no interferir con el movimiento
+  camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
+  
+  // Limitar el zoom
+  camera.lowerRadiusLimit = 2;
+  camera.upperRadiusLimit = 20;
 
   new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene).intensity = 0.8;
   const dir = new BABYLON.DirectionalLight("dir", new BABYLON.Vector3(-0.5,-1,-0.5), scene);
   dir.position = new BABYLON.Vector3(5,10,5);
   dir.intensity = 0.6;
 
+  // ===== PISO CON TEXTURA =====
   const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 40, height: 40 }, scene);
   const gmat = new BABYLON.StandardMaterial("gmat", scene);
-  gmat.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.22);
+  
+  // Cargar textura del piso (tierra de bosque)
+  gmat.diffuseTexture = new BABYLON.Texture("assets/textures/forest_ground.jpg", scene);
+  
+  // Repetir la textura para que no se vea estirada
+  gmat.diffuseTexture.uScale = 10; // Repetir 10 veces en X
+  gmat.diffuseTexture.vScale = 10; // Repetir 10 veces en Z
+  
   ground.material = gmat;
+
+  // ===== SKYBOX (CIELO ESTRELLADO) =====
+  const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, scene);
+  const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", scene);
+  skyboxMaterial.backFaceCulling = false;
+  
+  // Usar UNA SOLA imagen para el cielo
+  skyboxMaterial.emissiveTexture = new BABYLON.Texture("assets/textures/night.jpg", scene);
+  skyboxMaterial.disableLighting = true;
+  
+  skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+  skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+  skybox.material = skyboxMaterial;
 
   const folder = "assets/coraline/";
   const file = "coraline_walk.glb";
@@ -110,20 +138,257 @@ async function createScene() {
     });
 
     // Parent y encuadre
-    const container = new BABYLON.TransformNode("charRoot", scene);
-    const imported = res.meshes.filter(m => m && m !== ground);
-    imported.forEach(m => { if (m.rotationQuaternion) m.rotationQuaternion = null; });
-    if (imported[0]) imported[0].parent = container;
+    const playerRoot = new BABYLON.TransformNode("playerRoot", scene); // <-- AÑADIR
+ const container = new BABYLON.TransformNode("charRoot", scene);
+container.parent = playerRoot; // <-- AÑADIR (hacer container hijo del root)
+
+const imported = res.meshes.filter(m => m && m !== ground);
+imported.forEach(m => { if (m.rotationQuaternion) m.rotationQuaternion = null; });
+if (imported[0]) imported[0].parent = container;
 
     autoOrientUpright(container, imported, scene);
     frameCameraAndScale(container, imported, camera, scene);
 
+    // Guardar y mostrar la rotación inicial después de autoOrient
+    scene.executeWhenReady(() => {
+      scene.render(false);
+      console.log("Rotación inicial del container después de autoOrient:", {
+        x: container.rotation.x,
+        y: container.rotation.y,
+        z: container.rotation.z
+      });
+    });
+
     // Animaciones
     const groups = res.animationGroups ?? [];
     console.log("AnimationGroups:", groups.map(g => `${g.name} (targets:${g.targetedAnimations?.length ?? 0})`));
-    groups.forEach(g => g.loopAnimation = true);
-    const playable = groups.find(g => (g.targetedAnimations?.length ?? 0) > 0);
-    if (playable) playable.start(true);
+    
+    const walkAnim = groups.find(g => (g.targetedAnimations?.length ?? 0) > 0);
+    
+    if (walkAnim) {
+      console.log("Animación encontrada:", walkAnim.name);
+      walkAnim.loopAnimation = true;
+      walkAnim.start(true);
+      walkAnim.goToFrame(0);
+      walkAnim.pause();
+    } else {
+      console.warn("No se encontró animación!");
+    }
+
+    // ===== MOVIMIENTO CON CÁMARA FIJA =====
+    const moveSpeed = 0.08;
+    const keys = {};
+    let isMoving = false;
+
+    window.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+      if (['w', 's', 'a', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
+        e.preventDefault();
+        keys[key] = true;
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      const key = e.key.toLowerCase();
+      keys[key] = false;
+    });
+
+    scene.onBeforeRenderObservable.add(() => {
+      let movement = BABYLON.Vector3.Zero();
+      
+      // --- LÓGICA DE MOVIMIENTO RELATIVA A LA CÁMARA ---
+      const cameraForward = camera.getDirection(BABYLON.Axis.Z);
+      const cameraRight = camera.getDirection(BABYLON.Axis.X);
+      cameraForward.y = 0;
+      cameraRight.y = 0;
+      cameraForward.normalize();
+      cameraRight.normalize();
+
+      if (keys['w'] || keys['arrowup']) {
+        movement.addInPlace(cameraForward);
+      } else if (keys['s'] || keys['arrowdown']) {
+        movement.addInPlace(cameraForward.scale(-1));
+      } else if (keys['a'] || keys['arrowleft']) {
+        movement.addInPlace(cameraRight.scale(-1));
+      } else if (keys['d'] || keys['arrowright']) {
+        movement.addInPlace(cameraRight);
+      }
+
+      const wasMoving = isMoving;
+      isMoving = movement.length() > 0;
+
+      if (walkAnim && isMoving !== wasMoving) {
+        if (isMoving) {
+          console.log("Iniciando animación");
+          walkAnim.play(true);
+        } else {
+          console.log("Pausando animación");
+          walkAnim.pause();
+        }
+      }
+
+      if (isMoving) {
+        movement.normalize();
+        // Mueve el NODO PADRE
+        playerRoot.position.addInPlace(movement.scale(moveSpeed));
+
+        // Calcular la rotación basada en la dirección del movimiento
+        const targetRotation = Math.atan2(movement.x, movement.z);
+
+        // Rota el NODO PADRE y añade 180 grados para corregir la orientación
+        playerRoot.rotation.y = targetRotation + Math.PI;
+
+         // Actualiza tu log para reflejar el nodo correcto (opcional pero recomendado)
+         console.log("Rotación aplicada a playerRoot:", {
+           targetDegrees: (targetRotation * 180 / Math.PI).toFixed(0) + "°",
+           targetRadians: targetRotation.toFixed(3),
+           currentY: playerRoot.rotation.y.toFixed(3),
+           currentX: playerRoot.rotation.x.toFixed(3),
+           currentZ: playerRoot.rotation.z.toFixed(3)
+         });
+      }
+      // HACER QUE LA CÁMARA SIGA AL JUGADOR
+      camera.setTarget(playerRoot.position);
+    });
+
+    // ===== CARGAR ÁRBOLES DE SAKURA (DENTRO DEL TRY DE CORALINE) =====
+    const sakuraFolder = "assets/sakura/";
+    const sakuraFile = "sakura_cherry_blossom.glb";
+
+    // ÁRBOL 1 - Lado derecho
+    try {
+      const sakuraRes1 = await BABYLON.SceneLoader.ImportMeshAsync("", sakuraFolder, sakuraFile, scene);
+      
+      console.log("Árbol de sakura 1 cargado:", sakuraRes1.meshes.length, "meshes");
+      
+      const sakuraContainer1 = new BABYLON.TransformNode("sakuraRoot1", scene);
+      
+      if (sakuraRes1.meshes[0]) {
+        sakuraRes1.meshes[0].parent = sakuraContainer1;
+      }
+      
+      // Posición: A la derecha de Coraline
+      sakuraContainer1.position = new BABYLON.Vector3(4, 0, 2);
+      sakuraContainer1.scaling = new BABYLON.Vector3(1, 1, 1);
+      
+      console.log("Árbol 1 posicionado en:", sakuraContainer1.position);
+      
+    } catch (sakuraError) {
+      console.error("Error cargando árbol de sakura 1:", sakuraError);
+    }
+
+    // ÁRBOL 2 - Lado izquierdo (paralelo al primero)
+    try {
+      const sakuraRes2 = await BABYLON.SceneLoader.ImportMeshAsync("", sakuraFolder, sakuraFile, scene);
+      
+      console.log("Árbol de sakura 2 cargado:", sakuraRes2.meshes.length, "meshes");
+      
+      const sakuraContainer2 = new BABYLON.TransformNode("sakuraRoot2", scene);
+      
+      if (sakuraRes2.meshes[0]) {
+        sakuraRes2.meshes[0].parent = sakuraContainer2;
+      }
+      
+      // Posición: A la izquierda de Coraline (paralelo al árbol 1)
+      sakuraContainer2.position = new BABYLON.Vector3(-4, 0, 2);
+      sakuraContainer2.scaling = new BABYLON.Vector3(1, 1, 1);
+      sakuraContainer2.rotation.y = Math.PI; // 180 grados
+      
+      console.log("Árbol 2 posicionado en:", sakuraContainer2.position);
+      
+    } catch (sakuraError) {
+      console.error("Error cargando árbol de sakura 2:", sakuraError);
+    }
+
+    // ÁRBOL 3 - Lado izquierdo más adelante
+    try {
+      const sakuraRes3 = await BABYLON.SceneLoader.ImportMeshAsync("", sakuraFolder, sakuraFile, scene);
+      
+      console.log("Árbol de sakura 3 cargado:", sakuraRes3.meshes.length, "meshes");
+      
+      const sakuraContainer3 = new BABYLON.TransformNode("sakuraRoot3", scene);
+      
+      if (sakuraRes3.meshes[0]) {
+        sakuraRes3.meshes[0].parent = sakuraContainer3;
+      }
+      
+      // Posición: A la izquierda más adelante
+      sakuraContainer3.position = new BABYLON.Vector3(-4, 0, 4);
+      sakuraContainer3.scaling = new BABYLON.Vector3(1, 1, 1);
+      sakuraContainer3.rotation.y = Math.PI; // 180 grados
+      
+      console.log("Árbol 3 posicionado en:", sakuraContainer3.position);
+      
+    } catch (sakuraError) {
+      console.error("Error cargando árbol de sakura 3:", sakuraError);
+    }
+
+    // ÁRBOL 4 - Lado derecho más adelante
+    try {
+      const sakuraRes4 = await BABYLON.SceneLoader.ImportMeshAsync("", sakuraFolder, sakuraFile, scene);
+      
+      console.log("Árbol de sakura 4 cargado:", sakuraRes4.meshes.length, "meshes");
+      
+      const sakuraContainer4 = new BABYLON.TransformNode("sakuraRoot4", scene);
+      
+      if (sakuraRes4.meshes[0]) {
+        sakuraRes4.meshes[0].parent = sakuraContainer4;
+      }
+      
+      // Posición: A la derecha más adelante
+      sakuraContainer4.position = new BABYLON.Vector3(4, 0, 4);
+      sakuraContainer4.scaling = new BABYLON.Vector3(1, 1, 1);
+      
+      console.log("Árbol 4 posicionado en:", sakuraContainer4.position);
+      
+    } catch (sakuraError) {
+      console.error("Error cargando árbol de sakura 4:", sakuraError);
+    }
+
+    // ÁRBOL 5 - Lado izquierdo atrás
+    try {
+      const sakuraRes5 = await BABYLON.SceneLoader.ImportMeshAsync("", sakuraFolder, sakuraFile, scene);
+      
+      console.log("Árbol de sakura 5 cargado:", sakuraRes5.meshes.length, "meshes");
+      
+      const sakuraContainer5 = new BABYLON.TransformNode("sakuraRoot5", scene);
+      
+      if (sakuraRes5.meshes[0]) {
+        sakuraRes5.meshes[0].parent = sakuraContainer5;
+      }
+      
+      // Posición: A la izquierda atrás (Z = -4)
+      sakuraContainer5.position = new BABYLON.Vector3(-4, 0, -4);
+      sakuraContainer5.scaling = new BABYLON.Vector3(1, 1, 1);
+      
+      console.log("Árbol 5 posicionado en:", sakuraContainer5.position);
+      
+    } catch (sakuraError) {
+      console.error("Error cargando árbol de sakura 5:", sakuraError);
+    }
+
+    // ÁRBOL 6 - Lado derecho atrás
+    try {
+      const sakuraRes6 = await BABYLON.SceneLoader.ImportMeshAsync("", sakuraFolder, sakuraFile, scene);
+      
+      console.log("Árbol de sakura 6 cargado:", sakuraRes6.meshes.length, "meshes");
+      
+      const sakuraContainer6 = new BABYLON.TransformNode("sakuraRoot6", scene);
+      
+      if (sakuraRes6.meshes[0]) {
+        sakuraRes6.meshes[0].parent = sakuraContainer6;
+      }
+      
+      // Posición: A la derecha atrás (Z = -4)
+      sakuraContainer6.position = new BABYLON.Vector3(4, 0, -4);
+      sakuraContainer6.scaling = new BABYLON.Vector3(1, 1, 1);
+      sakuraContainer6.rotation.y = Math.PI; // 180 grados
+
+      console.log("Árbol 6 posicionado en:", sakuraContainer6.position);
+      
+    } catch (sakuraError) {
+      console.error("Error cargando árbol de sakura 6:", sakuraError);
+    }
 
   } catch (e) {
     console.error("Error cargando GLB:", e);
@@ -166,20 +431,57 @@ function autoOrientUpright(container, meshes, scene) {
 
 function frameCameraAndScale(container, meshes, camera, scene) {
   scene.executeWhenReady(() => {
-    const { size } = computeWorldBounds(meshes);
+    scene.render(false);
+    scene.render(false);
+    
+    const { size, min } = computeWorldBounds(meshes);
     const currentH = Math.max(0.001, size.y);
     const desiredH = 1.8;
     const s = desiredH / currentH;
     container.scaling.set(s, s, s);
+    
     scene.render(false);
-    const { min, max } = computeWorldBounds(meshes);
-    const center = min.add(max).scale(0.5);
-    const diag = max.subtract(min).length();
-    camera.setTarget(center);
-    camera.radius = Math.max(3, diag * 0.8);
-    camera.beta = Math.min(Math.max(0.6, camera.beta), Math.PI - 0.6);
+    const { min: newMin, max, center } = computeWorldBounds(meshes);
+    const groundY = 0;
+    const offset = groundY - newMin.y;
+    container.position.y += offset;
+    
+    console.log("Ajuste de posición Y:", offset);
+    console.log("Posición final del container:", container.position.y);
   });
 }
+
+// ELIMINAR ESTE BLOQUE (está duplicado y fuera de la función)
+// const sakuraFolder = "assets/sakura/";
+// const sakuraFile = "sakura_cherry_blossom.glb";
+
+// try {
+//   const sakuraRes = await BABYLON.SceneLoader.ImportMeshAsync("", sakuraFolder, sakuraFile, scene);
+  
+//   console.log("Árbol de sakura cargado:", sakuraRes.meshes.length, "meshes");
+  
+//   // Crear un contenedor para el árbol
+//   const sakuraContainer = new BABYLON.TransformNode("sakuraRoot", scene);
+  
+//   // Asignar todos los meshes del árbol al contenedor
+//   if (sakuraRes.meshes[0]) {
+//     sakuraRes.meshes[0].parent = sakuraContainer;
+//   }
+  
+//   // Posicionar el árbol (ajusta según necesites)
+//   sakuraContainer.position = new BABYLON.Vector3(0, 5, -10); // Ejemplo: en (0, 5, -10)
+  
+//   // Ajustar escala si es necesario
+//   sakuraContainer.scaling = new BABYLON.Vector3(2, 2, 2);
+  
+//   // Opcional: rotar el árbol
+//   // sakuraContainer.rotation.y = Math.PI / 4; // 45 grados
+  
+//   console.log("Árbol posicionado en:", sakuraContainer.position);
+  
+// } catch (sakuraError) {
+//   console.error("Error cargando árbol de sakura:", sakuraError);
+// }
 
 createScene().then(scene => engine.runRenderLoop(() => scene.render()));
 window.addEventListener("resize", () => engine.resize());
