@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BabylonJS | 4 Cámaras Playground</title>
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #renderCanvas { width: 100%; height: 100%; touch-action: none; display: block; background: #1d1f21; }
+    .ui { position: absolute; z-index: 10; }
+    .ui.top-right { top: 12px; right: 12px; display: flex; gap: 8px; }
+    .ui.top-left { top: 12px; left: 12px; }
+    .btn { background: #2e7dff; color: white; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+    .btn:hover { background: #1463f3; }
+    .info { background: rgba(0,0,0,0.55); color: #e6edf3; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; padding: 10px 12px; min-width: 260px; max-width: 380px; }
+    .info h4 { margin: 0 0 6px; font-size: 14px; opacity: 0.9; }
+    .info p { margin: 0; font-size: 13px; line-height: 1.35; }
+  </style>
+</head>
+<body>
+  <div class="ui top-right">
+    <button id="btnUniversal" class="btn">Universal</button>
+    <button id="btnArc" class="btn">ArcRotate</button>
+    <button id="btnFollow" class="btn">Follow</button>
+    <button id="btnFree" class="btn">Free</button>
+  </div>
+  <div class="ui top-left info" id="camInfo">
+    <h4>Cámara activa</h4>
+    <p>Universal: Cámara por defecto para teclado/ratón en primera/tercera persona.</p>
+  </div>
+
+  <canvas id="renderCanvas"></canvas>
+
+  <!-- BabylonJS CDN -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+
+  <script>
+    (function(){
+      const canvas = document.getElementById('renderCanvas');
+      const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+
+      const createScene = function() {
+        const scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color4(0.05, 0.06, 0.07, 1);
+
+        // Luz
+        const light = new BABYLON.HemisphericLight('hemi', new BABYLON.Vector3(0, 1, 0), scene);
+        light.intensity = 0.95;
+
+        // Suelo
+        const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 30, height: 30 }, scene);
+        const groundMat = new BABYLON.StandardMaterial('groundMat', scene);
+        groundMat.diffuseColor = new BABYLON.Color3(0.18, 0.2, 0.22);
+        groundMat.specularColor = new BABYLON.Color3(0,0,0);
+        ground.material = groundMat;
+
+        // Caja roja en el centro
+        const centerBox = BABYLON.MeshBuilder.CreateBox('centerBox', { size: 2 }, scene);
+        centerBox.position.y = 1;
+        const boxMat = new BABYLON.StandardMaterial('boxMat', scene);
+        boxMat.diffuseColor = new BABYLON.Color3(1, 0.2, 0.2);
+        boxMat.specularColor = new BABYLON.Color3(0.3, 0.3, 0.3);
+        centerBox.material = boxMat;
+
+        // Esfera verde que se mueve en círculo
+        const movingSphere = BABYLON.MeshBuilder.CreateSphere('movingSphere', { diameter: 1 }, scene);
+        movingSphere.position.y = 1;
+        const sphereMat = new BABYLON.StandardMaterial('sphereMat', scene);
+        sphereMat.diffuseColor = new BABYLON.Color3(0.2, 1, 0.2);
+        movingSphere.material = sphereMat;
+
+        let t = 0;
+        scene.onBeforeRenderObservable.add(() => {
+          const dt = scene.getEngine().getDeltaTime() * 0.001; // segundos
+          t += dt;
+          const r = 6; // radio
+          movingSphere.position.x = Math.cos(t) * r;
+          movingSphere.position.z = Math.sin(t) * r;
+          movingSphere.position.y = 1 + Math.sin(t * 2) * 0.25; // leve rebote
+        });
+
+        // Cámaras
+        // 1) UniversalCamera (activa por defecto)
+        const universal = new BABYLON.UniversalCamera('UniversalCamera', new BABYLON.Vector3(0, 2, -10), scene);
+        universal.setTarget(new BABYLON.Vector3(0, 1, 0));
+        universal.speed = 0.5;
+
+        // 2) ArcRotateCamera apuntando a la caja
+        const arc = new BABYLON.ArcRotateCamera('ArcRotateCamera', -Math.PI/2, Math.PI/3, 12, centerBox.position, scene);
+        arc.lowerRadiusLimit = 3;
+        arc.upperRadiusLimit = 40;
+
+        // 3) FollowCamera siguiendo la esfera
+        const follow = new BABYLON.FollowCamera('FollowCamera', new BABYLON.Vector3(0, 4, -10), scene);
+        follow.lockedTarget = movingSphere; // sigue a la esfera
+        follow.radius = 10;       // distancia al objetivo
+        follow.heightOffset = 3;  // altura
+        follow.rotationOffset = 0; // ángulo alrededor del objetivo
+        follow.cameraAcceleration = 0.05; // suavizado
+        follow.maxCameraSpeed = 20;
+
+        // 4) FreeCamera clásica
+        const free = new BABYLON.FreeCamera('FreeCamera', new BABYLON.Vector3(10, 6, -10), scene);
+        free.setTarget(new BABYLON.Vector3(0, 1, 0));
+        free.speed = 0.6;
+
+        // Helper: activar cámaras con control y actualizar UI
+        const camInfo = document.getElementById('camInfo');
+        const descriptions = {
+          'UniversalCamera': 'Universal: Cámara versátil para teclado/ratón; útil para navegación en primera/tercera persona.',
+          'ArcRotateCamera': 'ArcRotate: Gira alrededor de un objetivo (ideal para orbitar modelos/escenas).',
+          'FollowCamera': 'Follow: Sigue a un objetivo con offsets (útil para perseguir personajes/vehículos).',
+          'FreeCamera': 'Free: Cámara libre tipo vuelo; se controla con teclado/ratón.'
+        };
+
+        function describeActive(cam) {
+          const name = cam.name;
+          const text = descriptions[name] || name;
+          camInfo.innerHTML = `<h4>Cámara activa</h4><p>${text}</p>`;
+        }
+
+        function setActiveCamera(cam) {
+          if (scene.activeCamera) {
+            scene.activeCamera.detachControl(canvas);
+          }
+          scene.activeCamera = cam;
+          cam.attachControl(canvas, true);
+          describeActive(cam);
+        }
+
+        // Botones UI
+        document.getElementById('btnUniversal').addEventListener('click', () => setActiveCamera(universal));
+        document.getElementById('btnArc').addEventListener('click', () => setActiveCamera(arc));
+        document.getElementById('btnFollow').addEventListener('click', () => setActiveCamera(follow));
+        document.getElementById('btnFree').addEventListener('click', () => setActiveCamera(free));
+
+        // Activar por defecto Universal
+        setActiveCamera(universal);
+
+        return scene;
+      };
+
+      const scene = createScene();
+
+      engine.runRenderLoop(() => {
+        scene.render();
+      });
+
+      window.addEventListener('resize', () => {
+        engine.resize();
+      });
+    })();
+  </script>
+</body>
+</html>

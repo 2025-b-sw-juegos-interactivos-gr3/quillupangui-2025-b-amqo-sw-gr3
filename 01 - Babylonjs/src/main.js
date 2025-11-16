@@ -6,6 +6,18 @@ const engine = new BABYLON.Engine(canvas, true);
 async function createScene() {
   const scene = new BABYLON.Scene(engine);
 
+  // === Havok Physics init ===
+  let physicsEnabled = false;
+  try {
+    const hk = await import("https://cdn.babylonjs.com/havok/HavokPhysics.js");
+    const havokInstance = await (hk?.HavokPhysics ? hk.HavokPhysics() : HavokPhysics());
+    const havokPlugin = new BABYLON.HavokPlugin(true, havokInstance);
+    scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), havokPlugin);
+    physicsEnabled = true;
+  } catch (e) {
+    console.warn("Havok init failed; physics will be disabled.", e);
+  }
+
   // CAMBIAR A CÁMARA QUE SIGUE AL JUGADOR (ArcRotateCamera)
   const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.5, 10, BABYLON.Vector3.Zero(), scene);
   camera.attachControl(canvas, true);
@@ -35,6 +47,11 @@ async function createScene() {
   
   ground.material = gmat;
 
+  // Physics: static ground collider
+  try {
+    new BABYLON.PhysicsAggregate(ground, BABYLON.PhysicsShapeType.BOX, { mass: 0, friction: 0.8, restitution: 0 }, scene);
+  } catch {}
+
   // ===== SKYBOX (CIELO ESTRELLADO) =====
   const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, scene);
   const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", scene);
@@ -47,6 +64,20 @@ async function createScene() {
   skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
   skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
   skybox.material = skyboxMaterial;
+
+  // Physics demo extras (static): a box and a sphere to test collisions
+  // Quitar objetos de demo visibles (dejamos ejemplo comentado por si se quiere probar)
+  // try {
+  //   const staticBox = BABYLON.MeshBuilder.CreateBox("staticBox", { size: 1 }, scene);
+  //   staticBox.position = new BABYLON.Vector3(2, 0.5, 5);
+  //   staticBox.isVisible = false;
+  //   new BABYLON.PhysicsAggregate(staticBox, BABYLON.PhysicsShapeType.BOX, { mass: 0, friction: 0.8 }, scene);
+  //
+  //   const staticSphere = BABYLON.MeshBuilder.CreateSphere("staticSphere", { diameter: 1 }, scene);
+  //   staticSphere.position = new BABYLON.Vector3(-2, 0.5, 5);
+  //   staticSphere.isVisible = false;
+  //   new BABYLON.PhysicsAggregate(staticSphere, BABYLON.PhysicsShapeType.SPHERE, { mass: 0, friction: 0.8 }, scene);
+  // } catch {}
 
   const folder = "assets/coraline/";
   const file = "coraline_walk.glb";
@@ -138,9 +169,27 @@ async function createScene() {
     });
 
     // Parent y encuadre
-    const playerRoot = new BABYLON.TransformNode("playerRoot", scene); // <-- AÑADIR
- const container = new BABYLON.TransformNode("charRoot", scene);
-container.parent = playerRoot; // <-- AÑADIR (hacer container hijo del root)
+    // === Player physics collider (capsule) ===
+    let playerAggregate;
+    const playerCollider = BABYLON.MeshBuilder.CreateCapsule("playerCollider", { height: 1.8, radius: 0.4 }, scene);
+    playerCollider.position = new BABYLON.Vector3(0, 0.9, 0);
+    playerCollider.isVisible = false;
+    try {
+      playerAggregate = new BABYLON.PhysicsAggregate(playerCollider, BABYLON.PhysicsShapeType.CAPSULE, { mass: 1, friction: 0.5, restitution: 0 }, scene);
+      playerAggregate.body.setAngularDamping(100.0);
+    } catch {}
+
+    // Fallback de colisiones sin físicas
+    if (!physicsEnabled) {
+      scene.collisionsEnabled = true;
+      ground.checkCollisions = true;
+      playerCollider.checkCollisions = true;
+      playerCollider.ellipsoid = new BABYLON.Vector3(0.4, 0.9, 0.4);
+      playerCollider.ellipsoidOffset = new BABYLON.Vector3(0, 0.9, 0);
+    }
+
+    const container = new BABYLON.TransformNode("charRoot", scene);
+    container.parent = playerCollider;
 
 const imported = res.meshes.filter(m => m && m !== ground);
 imported.forEach(m => { if (m.rotationQuaternion) m.rotationQuaternion = null; });
@@ -176,7 +225,7 @@ if (imported[0]) imported[0].parent = container;
     }
 
     // ===== MOVIMIENTO CON CÁMARA FIJA =====
-    const moveSpeed = 0.08;
+  const moveSpeed = 5;
     const keys = {};
     let isMoving = false;
 
@@ -194,6 +243,7 @@ if (imported[0]) imported[0].parent = container;
     });
 
     scene.onBeforeRenderObservable.add(() => {
+      const dt = scene.getEngine().getDeltaTime() * 0.001;
       let movement = BABYLON.Vector3.Zero();
       
       // --- LÓGICA DE MOVIMIENTO RELATIVA A LA CÁMARA ---
@@ -204,18 +254,13 @@ if (imported[0]) imported[0].parent = container;
       cameraForward.normalize();
       cameraRight.normalize();
 
-      if (keys['w'] || keys['arrowup']) {
-        movement.addInPlace(cameraForward);
-      } else if (keys['s'] || keys['arrowdown']) {
-        movement.addInPlace(cameraForward.scale(-1));
-      } else if (keys['a'] || keys['arrowleft']) {
-        movement.addInPlace(cameraRight.scale(-1));
-      } else if (keys['d'] || keys['arrowright']) {
-        movement.addInPlace(cameraRight);
-      }
+      if (keys['w'] || keys['arrowup']) movement.addInPlace(cameraForward);
+      if (keys['s'] || keys['arrowdown']) movement.addInPlace(cameraForward.scale(-1));
+      if (keys['a'] || keys['arrowleft']) movement.addInPlace(cameraRight.scale(-1));
+      if (keys['d'] || keys['arrowright']) movement.addInPlace(cameraRight);
 
-      const wasMoving = isMoving;
-      isMoving = movement.length() > 0;
+  const wasMoving = isMoving;
+  isMoving = movement.lengthSquared() > 1e-6;
 
       if (walkAnim && isMoving !== wasMoving) {
         if (isMoving) {
@@ -229,26 +274,39 @@ if (imported[0]) imported[0].parent = container;
 
       if (isMoving) {
         movement.normalize();
-        // Mueve el NODO PADRE
-        playerRoot.position.addInPlace(movement.scale(moveSpeed));
+        // Apply velocity to physics body (preserve Y velocity for gravity)
+        const finalVelocity = movement.scale(moveSpeed);
+        if (physicsEnabled && playerAggregate?.body) {
+          playerAggregate.body.setLinearVelocity(new BABYLON.Vector3(
+            finalVelocity.x,
+            playerAggregate.body.getLinearVelocity().y,
+            finalVelocity.z
+          ));
+        } else {
+          // Fallback sin físicas: mover con colisiones AABB
+          const delta = movement.scale(moveSpeed * dt);
+          if (scene.collisionsEnabled && playerCollider.checkCollisions) {
+            playerCollider.moveWithCollisions(delta);
+          } else {
+            playerCollider.position.addInPlace(delta);
+          }
+        }
 
-        // Calcular la rotación basada en la dirección del movimiento
+        // Rotate physics collider to face movement direction
         const targetRotation = Math.atan2(movement.x, movement.z);
-
-        // Rota el NODO PADRE y añade 180 grados para corregir la orientación
-        playerRoot.rotation.y = targetRotation + Math.PI;
-
-         // Actualiza tu log para reflejar el nodo correcto (opcional pero recomendado)
-         console.log("Rotación aplicada a playerRoot:", {
-           targetDegrees: (targetRotation * 180 / Math.PI).toFixed(0) + "°",
-           targetRadians: targetRotation.toFixed(3),
-           currentY: playerRoot.rotation.y.toFixed(3),
-           currentX: playerRoot.rotation.x.toFixed(3),
-           currentZ: playerRoot.rotation.z.toFixed(3)
-         });
+        playerCollider.rotation.y = targetRotation + Math.PI;
+      } else {
+        // Stop horizontal motion but keep gravity
+        if (physicsEnabled && playerAggregate?.body) {
+          playerAggregate.body.setLinearVelocity(new BABYLON.Vector3(
+            0,
+            playerAggregate.body.getLinearVelocity().y,
+            0
+          ));
+        }
       }
-      // HACER QUE LA CÁMARA SIGA AL JUGADOR
-      camera.setTarget(playerRoot.position);
+      // Camera follow
+      camera.setTarget(playerCollider.position);
     });
 
     // ===== CARGAR ÁRBOLES DE SAKURA (DENTRO DEL TRY DE CORALINE) =====
@@ -268,8 +326,15 @@ if (imported[0]) imported[0].parent = container;
       }
       
       // Posición: A la derecha de Coraline
-      sakuraContainer1.position = new BABYLON.Vector3(4, 0, 2);
-      sakuraContainer1.scaling = new BABYLON.Vector3(1, 1, 1);
+  sakuraContainer1.position = new BABYLON.Vector3(4, 0, 2);
+  sakuraContainer1.scaling = new BABYLON.Vector3(1, 1, 1);
+  // Static trunk collider (invisible)
+  const trunk1 = BABYLON.MeshBuilder.CreateCylinder("sakuraTrunk1", { diameter: 0.8, height: 3 }, scene);
+  trunk1.isVisible = false;
+  trunk1.parent = sakuraContainer1;
+  trunk1.position.y = 1.5;
+  trunk1.checkCollisions = true;
+  try { new BABYLON.PhysicsAggregate(trunk1, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, friction: 0.8 }, scene); } catch {}
       
       console.log("Árbol 1 posicionado en:", sakuraContainer1.position);
       
@@ -290,8 +355,14 @@ if (imported[0]) imported[0].parent = container;
       }
       
       // Posición: A la izquierda de Coraline (paralelo al árbol 1)
-      sakuraContainer2.position = new BABYLON.Vector3(-4, 0, 2);
-      sakuraContainer2.scaling = new BABYLON.Vector3(1, 1, 1);
+  sakuraContainer2.position = new BABYLON.Vector3(-4, 0, 2);
+  sakuraContainer2.scaling = new BABYLON.Vector3(1, 1, 1);
+  const trunk2 = BABYLON.MeshBuilder.CreateCylinder("sakuraTrunk2", { diameter: 0.8, height: 3 }, scene);
+  trunk2.isVisible = false;
+  trunk2.parent = sakuraContainer2;
+  trunk2.position.y = 1.5;
+  trunk2.checkCollisions = true;
+  try { new BABYLON.PhysicsAggregate(trunk2, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, friction: 0.8 }, scene); } catch {}
       sakuraContainer2.rotation.y = Math.PI; // 180 grados
       
       console.log("Árbol 2 posicionado en:", sakuraContainer2.position);
@@ -313,8 +384,14 @@ if (imported[0]) imported[0].parent = container;
       }
       
       // Posición: A la izquierda más adelante
-      sakuraContainer3.position = new BABYLON.Vector3(-4, 0, 4);
-      sakuraContainer3.scaling = new BABYLON.Vector3(1, 1, 1);
+  sakuraContainer3.position = new BABYLON.Vector3(-4, 0, 4);
+  sakuraContainer3.scaling = new BABYLON.Vector3(1, 1, 1);
+  const trunk3 = BABYLON.MeshBuilder.CreateCylinder("sakuraTrunk3", { diameter: 0.8, height: 3 }, scene);
+  trunk3.isVisible = false;
+  trunk3.parent = sakuraContainer3;
+  trunk3.position.y = 1.5;
+  trunk3.checkCollisions = true;
+  try { new BABYLON.PhysicsAggregate(trunk3, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, friction: 0.8 }, scene); } catch {}
       sakuraContainer3.rotation.y = Math.PI; // 180 grados
       
       console.log("Árbol 3 posicionado en:", sakuraContainer3.position);
@@ -336,8 +413,14 @@ if (imported[0]) imported[0].parent = container;
       }
       
       // Posición: A la derecha más adelante
-      sakuraContainer4.position = new BABYLON.Vector3(4, 0, 4);
-      sakuraContainer4.scaling = new BABYLON.Vector3(1, 1, 1);
+  sakuraContainer4.position = new BABYLON.Vector3(4, 0, 4);
+  sakuraContainer4.scaling = new BABYLON.Vector3(1, 1, 1);
+  const trunk4 = BABYLON.MeshBuilder.CreateCylinder("sakuraTrunk4", { diameter: 0.8, height: 3 }, scene);
+  trunk4.isVisible = false;
+  trunk4.parent = sakuraContainer4;
+  trunk4.position.y = 1.5;
+  trunk4.checkCollisions = true;
+  try { new BABYLON.PhysicsAggregate(trunk4, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, friction: 0.8 }, scene); } catch {}
       
       console.log("Árbol 4 posicionado en:", sakuraContainer4.position);
       
@@ -358,8 +441,14 @@ if (imported[0]) imported[0].parent = container;
       }
       
       // Posición: A la izquierda atrás (Z = -4)
-      sakuraContainer5.position = new BABYLON.Vector3(-4, 0, -4);
-      sakuraContainer5.scaling = new BABYLON.Vector3(1, 1, 1);
+  sakuraContainer5.position = new BABYLON.Vector3(-4, 0, -4);
+  sakuraContainer5.scaling = new BABYLON.Vector3(1, 1, 1);
+  const trunk5 = BABYLON.MeshBuilder.CreateCylinder("sakuraTrunk5", { diameter: 0.8, height: 3 }, scene);
+  trunk5.isVisible = false;
+  trunk5.parent = sakuraContainer5;
+  trunk5.position.y = 1.5;
+  trunk5.checkCollisions = true;
+  try { new BABYLON.PhysicsAggregate(trunk5, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, friction: 0.8 }, scene); } catch {}
       
       console.log("Árbol 5 posicionado en:", sakuraContainer5.position);
       
@@ -380,8 +469,14 @@ if (imported[0]) imported[0].parent = container;
       }
       
       // Posición: A la derecha atrás (Z = -4)
-      sakuraContainer6.position = new BABYLON.Vector3(4, 0, -4);
-      sakuraContainer6.scaling = new BABYLON.Vector3(1, 1, 1);
+  sakuraContainer6.position = new BABYLON.Vector3(4, 0, -4);
+  sakuraContainer6.scaling = new BABYLON.Vector3(1, 1, 1);
+  const trunk6 = BABYLON.MeshBuilder.CreateCylinder("sakuraTrunk6", { diameter: 0.8, height: 3 }, scene);
+  trunk6.isVisible = false;
+  trunk6.parent = sakuraContainer6;
+  trunk6.position.y = 1.5;
+  trunk6.checkCollisions = true;
+  try { new BABYLON.PhysicsAggregate(trunk6, BABYLON.PhysicsShapeType.CYLINDER, { mass: 0, friction: 0.8 }, scene); } catch {}
       sakuraContainer6.rotation.y = Math.PI; // 180 grados
 
       console.log("Árbol 6 posicionado en:", sakuraContainer6.position);
